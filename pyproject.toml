@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "attestwire"
+dynamic = ["version"]
+description = "Validate EN 16931 e-invoices (XRechnung, Factur-X/ZUGFeRD, Peppol BIS 3) via the hosted Attestwire API or the local @attestwire/en16931 CLI. Standard library only, no runtime dependencies."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Attestwire", email = "hello@attestwire.com" }]
+requires-python = ">=3.9"
+keywords = [
+  "e-invoice",
+  "einvoice",
+  "e-invoicing",
+  "en16931",
+  "xrechnung",
+  "factur-x",
+  "facturx",
+  "zugferd",
+  "peppol",
+  "ubl",
+  "cii",
+  "invoice",
+  "vat",
+  "compliance",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business :: Financial :: Accounting",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://attestwire.com"
+Documentation = "https://api.attestwire.com/docs"
+Repository = "https://github.com/attestwire/python-attestwire"
+Issues = "https://github.com/attestwire/python-attestwire/issues"
+
+[tool.hatch.version]
+path = "src/attestwire/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/attestwire"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "LICENSE", "CHANGELOG.md"]
