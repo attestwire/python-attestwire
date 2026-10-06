@@ -10,9 +10,14 @@ nor Node. These exist to catch the hosted API's contract actually drifting
 from what this package assumes, which a mock can never catch by construction.
 """
 
+import contextlib
+import io
 import os
+import re
 import shutil
+import tempfile
 import unittest
+from pathlib import Path
 
 import attestwire
 
@@ -48,6 +53,72 @@ class LiveApiTests(unittest.TestCase):
             attestwire.validate(INCOMPLETE_UBL, api_key="aw_live_definitely_not_a_real_key", mode="api")
         self.assertEqual(ctx.exception.status, 401)
         self.assertEqual(ctx.exception.code, "invalid_api_key")
+
+
+# The smallest XRechnung that passes every rule: what generate() needs to
+# produce a document at all.
+VALID_INVOICE = {
+    "profile": "xrechnung-ubl",
+    "invoiceNumber": "LIVE-0001",
+    "issueDate": "2026-08-09",
+    "currency": "EUR",
+    "buyerReference": "04011000-1234512345-06",
+    "deliveryDate": "2026-08-31",
+    "seller": {
+        "name": "Acme GmbH",
+        "vatId": "DE123456789",
+        "address": {"line1": "Chausseestr. 1", "city": "Berlin", "postalCode": "10115", "countryCode": "DE"},
+        "electronicAddress": {"schemeId": "0204", "value": "04011000-1234512345-06"},
+        "contact": {"name": "Buchhaltung", "phone": "+49 30 1234567", "email": "rechnungen@acme.example"},
+    },
+    "buyer": {
+        "name": "Stadt Bonn",
+        "address": {"line1": "Berliner Platz 2", "city": "Bonn", "postalCode": "53111", "countryCode": "DE"},
+        "electronicAddress": {"schemeId": "0204", "value": "04011000-1234512345-06"},
+    },
+    "payment": {"meansCode": "58", "iban": "DE02120300000000202051"},
+    "lines": [
+        {"id": "1", "description": "Consulting", "quantity": 10, "unitCode": "HUR", "unitPrice": 150, "vatCategory": "S", "vatRate": 19}
+    ],
+}
+
+
+@unittest.skipUnless(LIVE, "set ATTESTWIRE_LIVE_TEST=1 to run tests against the real API")
+class LiveGenerateTests(unittest.TestCase):
+    # The public demo key works on /v1/generate, so these need no account.
+    KEY = API_KEY or "demo"
+
+    def test_generate_xml(self):
+        out = attestwire.generate(VALID_INVOICE, api_key=self.KEY)
+        self.assertEqual(out.syntax, "ubl")
+        self.assertTrue(out.xml.startswith("<?xml"))
+
+    def test_generate_pdf(self):
+        out = attestwire.generate({**VALID_INVOICE, "profile": attestwire.PDF_PROFILE}, format="pdf", api_key=self.KEY)
+        self.assertTrue(out.pdf.startswith(b"%PDF"))
+        self.assertEqual(out.filename, "LIVE-0001.pdf")
+
+    def test_the_readme_example_runs(self):
+        readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
+        block = re.search(r"## Create an e-invoice\n\n```python\n(.*?)```", readme, re.S)
+        self.assertIsNotNone(block, "README.md has no Create an e-invoice example")
+        code = block.group(1).replace('"aw_live_..."', repr(self.KEY))
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()) as printed:
+                    exec(code, {})
+                self.assertTrue(Path(tmp, "2026-000142.pdf").read_bytes().startswith(b"%PDF"))
+            finally:
+                os.chdir(cwd)
+        self.assertIn("<cbc:BuyerReference>PO-4711</cbc:BuyerReference>", printed.getvalue())
+
+    def test_generate_refuses_an_invalid_invoice_with_its_findings(self):
+        invalid = {k: v for k, v in VALID_INVOICE.items() if k != "buyerReference"}
+        with self.assertRaises(attestwire.InvalidInvoiceError) as ctx:
+            attestwire.generate(invalid, api_key=self.KEY)
+        self.assertEqual([f.rule for f in ctx.exception.result.errors], ["BR-DE-15"])
 
 
 @unittest.skipUnless(LIVE, "set ATTESTWIRE_LIVE_TEST=1 to run tests against the real API")

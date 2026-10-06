@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "attestwire"
 dynamic = ["version"]
-description = "Validate EN 16931 e-invoices (XRechnung, Factur-X/ZUGFeRD, Peppol BIS 3) via the hosted Attestwire API or the local @attestwire/en16931 CLI. Standard library only, no runtime dependencies."
+description = "Create and validate EN 16931 e-invoices (XRechnung, Factur-X/ZUGFeRD PDFs, Peppol BIS 3) via the hosted Attestwire API, or validate locally with the @attestwire/en16931 CLI. Standard library only, no runtime dependencies."
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Attestwire", email = "hello@attestwire.com" }]

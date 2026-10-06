@@ -137,3 +137,56 @@ def findings_from_validation_result_json(body: dict) -> list:
         for item in body.get(key) or []:
             findings.append(Finding.from_json(item))
     return findings
+
+
+@dataclasses.dataclass(frozen=True)
+class GeneratedInvoice:
+    """What `generate()` returns: the e-invoice, ready to send.
+
+    With ``format="xml"``, ``xml`` holds the document (UBL or CII, as the
+    invoice's ``profile`` decides) and ``pdf`` is None. With ``format="pdf"``,
+    ``pdf`` holds a Factur-X / ZUGFeRD PDF (PDF/A-3B, the CII XML embedded in
+    it) and ``xml`` is None. ``content`` is whichever one is there, as bytes,
+    and ``filename`` a name to save it under.
+
+    Generation only succeeds for an invoice with no fatal finding, so there
+    are no ``errors`` here; the advisory findings ride along in ``findings``
+    (XML only: the PDF response carries none).
+    """
+
+    format: Literal["xml", "pdf"]
+    xml: Optional[str] = None
+    pdf: Optional[bytes] = None
+    #: A file name for ``content``: from the API for a PDF, from the invoice
+    #: number for XML.
+    filename: Optional[str] = None
+    profile: Optional[str] = None
+    #: "ubl" or "cii". XML only.
+    syntax: Optional[str] = None
+    #: Warning and information findings. XML only.
+    findings: Sequence[Finding] = ()
+    #: For CII XML: a reminder that it is the XML payload, not a Factur-X file.
+    note: Optional[str] = None
+    #: PDF only: True when the PDF is the free plan's watermarked preview.
+    watermarked: bool = False
+    #: PDF only: the language the page was drawn in ("en", "de", "fr").
+    language: Optional[str] = None
+    #: PDF only: characters the page could not draw (shown as "?"); the XML
+    #: inside the PDF has them right.
+    unrendered_characters: int = 0
+    #: The parsed JSON envelope (XML only), for fields this type does not model.
+    raw: Optional[dict] = None
+
+    @property
+    def content(self) -> bytes:
+        if self.pdf is not None:
+            return self.pdf
+        return (self.xml or "").encode("utf-8")
+
+    @property
+    def warnings(self) -> list:
+        return [f for f in self.findings if f.severity == "warning"]
+
+    @property
+    def information(self) -> list:
+        return [f for f in self.findings if f.severity == "information"]

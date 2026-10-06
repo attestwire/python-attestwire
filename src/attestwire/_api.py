@@ -39,6 +39,39 @@ def _content_type(data: bytes, was_text: bool) -> str:
     return media
 
 
+def resolve_api_key(api_key: Optional[str], origin: str, caller: str) -> str:
+    """`api_key`, else ``ATTESTWIRE_API_KEY``, else an error that says how to get one."""
+    key = api_key or os.environ.get(API_KEY_ENV_VAR)
+    if not key:
+        raise AttestwireError(
+            f"{caller} needs an API key: pass api_key=..., or set the "
+            f"{API_KEY_ENV_VAR} environment variable. Get one free, no card required, "
+            f"with POST {origin}/v1/keys — see {origin}/docs#auth."
+        )
+    return key
+
+
+def read_error_body(exc: HTTPError) -> dict:
+    """The JSON body of an HTTP error response, or ``{}`` when it is not JSON."""
+    try:
+        body = json.loads(exc.read().decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def api_error_from(exc: HTTPError, url: str, body: Optional[dict] = None) -> ApiError:
+    """The hosted API's error envelope, ``{error, message, docs, upgrade_url}``, as an `ApiError`."""
+    error_body = read_error_body(exc) if body is None else body
+    return ApiError(
+        exc.code,
+        error_body.get("error", "unknown_error"),
+        error_body.get("message") or f"POST {url} failed with HTTP {exc.code}.",
+        docs=error_body.get("docs"),
+        upgrade_url=error_body.get("upgrade_url"),
+    )
+
+
 def validate_via_api(
     data: bytes,
     *,
@@ -47,13 +80,7 @@ def validate_via_api(
     origin: str = DEFAULT_ORIGIN,
     timeout: float = 30.0,
 ) -> ValidationResult:
-    key = api_key or os.environ.get(API_KEY_ENV_VAR)
-    if not key:
-        raise AttestwireError(
-            "validate(mode=\"api\") needs an API key: pass api_key=..., or set the "
-            f"{API_KEY_ENV_VAR} environment variable. Get one free, no card required, "
-            f"with POST {origin}/v1/keys — see {origin}/docs#auth."
-        )
+    key = resolve_api_key(api_key, origin, 'validate(mode="api")')
 
     url = f"{origin.rstrip('/')}/v1/validate"
     request = Request(
@@ -72,18 +99,7 @@ def validate_via_api(
         with urlopen(request, timeout=timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        raw = exc.read()
-        try:
-            error_body = json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            error_body = {}
-        raise ApiError(
-            exc.code,
-            error_body.get("error", "unknown_error"),
-            error_body.get("message") or f"POST {url} failed with HTTP {exc.code}.",
-            docs=error_body.get("docs"),
-            upgrade_url=error_body.get("upgrade_url"),
-        ) from exc
+        raise api_error_from(exc, url) from exc
     except URLError as exc:
         raise AttestwireError(f"Could not reach {url}: {exc.reason}") from exc
 

@@ -1,16 +1,86 @@
 # attestwire
 
-Validate EN 16931 e-invoices — XRechnung, Factur-X/ZUGFeRD, Peppol BIS 3 —
-from Python. Standard library only (`urllib`, `json`, `subprocess`); nothing
-to install beyond this package itself. Python 3.9+.
+Create and check EN 16931 e-invoices — XRechnung, Factur-X/ZUGFeRD, Peppol
+BIS 3 — from Python. Describe the invoice as a dict and get the XML or a
+ready-to-send Factur-X / ZUGFeRD PDF; hand over an invoice you received and
+get every problem in it, with the fix. Standard library only (`urllib`,
+`json`, `subprocess`); nothing to install beyond this package itself.
+Python 3.9+.
 
 ```bash
 pip install attestwire
 ```
 
+## Create an e-invoice
+
 ```python
 import attestwire
 
+invoice = {
+    "profile": "facturx-en16931",   # or "xrechnung-ubl", "xrechnung-cii", "peppol-bis-3", "auto"
+    "invoiceNumber": "2026-000142",
+    "issueDate": "2026-08-09",
+    "currency": "EUR",
+    "seller": {
+        "name": "Acme GmbH",
+        "vatId": "DE123456789",
+        "address": {"line1": "Chausseestr. 1", "city": "Berlin", "postalCode": "10115", "countryCode": "DE"},
+        "contact": {"name": "Buchhaltung", "phone": "+49 30 1234567", "email": "rechnungen@acme.example"},
+    },
+    "buyer": {
+        "name": "Client Exemple SARL",
+        "vatId": "FR40303265045",
+        "address": {"line1": "1 rue de la Paix", "city": "Paris", "postalCode": "75002", "countryCode": "FR"},
+    },
+    "vatScenario": "intra-eu-services",   # say what happened; the VAT codes are filled in
+    "payment": {"iban": "DE02120300000000202051"},
+    "lines": [
+        {"id": "1", "description": "Consulting, August 2026", "quantity": 10, "unitCode": "HUR", "unitPrice": 150},
+    ],
+}
+
+pdf = attestwire.generate(invoice, format="pdf", api_key="aw_live_...")
+with open(pdf.filename, "wb") as f:      # 2026-000142.pdf
+    f.write(pdf.content)
+
+xml = attestwire.generate({**invoice, "profile": "xrechnung-ubl", "buyerReference": "PO-4711"}, api_key="aw_live_...")
+print(xml.xml)
+```
+
+`format="pdf"` returns a Factur-X / ZUGFeRD PDF: a readable invoice page (in
+German, French or English, from the seller's country unless you pass
+`pdf_options={"language": "fr"}`), written as PDF/A-3B with the CII XML
+embedded, so the customer's software reads the data and a person reads the
+page. It carries the `facturx-en16931` profile. Without `format`, you get the
+XML alone, for whichever profile the invoice names.
+
+The invoice is a dict in the shape the
+[`@attestwire/en16931`](https://www.npmjs.com/package/@attestwire/en16931)
+package calls `InvoiceInput`, documented field by field at
+[api.attestwire.com/docs#input](https://api.attestwire.com/docs#input).
+Totals are calculated from the lines; you do not send them.
+
+**An invoice that breaks a rule is not generated.** `generate()` raises
+`attestwire.InvalidInvoiceError`, and `.result` is what `validate()` would
+have returned: each rule, what is wrong and how to fix it.
+
+```python
+try:
+    attestwire.generate(invoice, format="pdf")
+except attestwire.InvalidInvoiceError as err:
+    for finding in err.result.errors:
+        print(finding.rule, finding.fix)
+```
+
+Generation goes through the hosted API, so it needs a key (`api_key=` or
+`ATTESTWIRE_API_KEY`); [get one free](https://api.attestwire.com/docs#auth),
+or pass `api_key="demo"` to try it without signing up. On the free plan the
+PDF is a watermarked preview (`pdf.watermarked` is `True`); paid plans get it
+clean. A refused invoice costs nothing.
+
+## Check an e-invoice
+
+```python
 with open("invoice.xml", "rb") as f:
     result = attestwire.validate(f.read(), api_key="aw_live_...")
 
@@ -95,17 +165,20 @@ properties above are there for when you just want one bucket.
 
 ## Errors you handle vs. exceptions you don't expect
 
-A **non-compliant invoice is never an exception.** `validate()` returns
+A **non-compliant invoice is never an exception from `validate()`.** It returns
 normally with `result.valid is False` and the findings that explain why —
-that's the whole point of the package. What *can* raise:
+that's the whole point of the package. `generate()` has nothing to return for
+one, so it raises `InvalidInvoiceError` with the same findings. What *can*
+raise:
 
 | Exception | When |
 | --- | --- |
-| `attestwire.ApiError` | `mode="api"` got an HTTP error status: `.status`, `.code`, `.message`, `.docs`, `.upgrade_url` (e.g. `401 invalid_api_key`, `413 too_large`, `429 rate_limited`). |
+| `attestwire.InvalidInvoiceError` | `generate()` only: the invoice breaks a rule, so nothing was generated (HTTP 422). `.result` is the `ValidationResult`, with each finding's fix. A subclass of `ApiError`. |
+| `attestwire.ApiError` | `mode="api"` or `generate()` got an HTTP error status: `.status`, `.code`, `.message`, `.docs`, `.upgrade_url` (e.g. `401 invalid_api_key`, `413 too_large`, `429 rate_limited`). |
 | `attestwire.CliError` | `mode="cli"` couldn't run at all: Node/npx missing, the subprocess timed out, or its output wasn't the JSON it promises (message includes stderr). |
-| `attestwire.AttestwireError` | `mode="api"` with no key available anywhere, or a network failure that never reached the API. Base class of the two above, if you want to catch either. |
-| `TypeError` | `data` is neither `bytes` nor `str`. |
-| `ValueError` | `mode` is neither `"api"` nor `"cli"`. |
+| `attestwire.AttestwireError` | `mode="api"` or `generate()` with no key available anywhere, or a network failure that never reached the API. Base class of the two above, if you want to catch either. |
+| `TypeError` | `data` is neither `bytes` nor `str`; `generate()`'s invoice is not a dict or JSON text. |
+| `ValueError` | `mode` is neither `"api"` nor `"cli"`; `generate()`'s `format` is neither `"xml"` nor `"pdf"`, or its invoice text is not JSON. |
 
 ## Recipes: the validation step for existing Python e-invoicing libraries
 
